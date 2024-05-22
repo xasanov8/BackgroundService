@@ -1,0 +1,6 @@
+@BcService_HostAddress = http://localhost:5217
+
+GET {{BcService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
