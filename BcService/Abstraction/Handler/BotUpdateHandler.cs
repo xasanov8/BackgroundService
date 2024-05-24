@@ -1,34 +1,73 @@
-﻿using Telegram.Bot;
-using Telegram.Bot.Polling;
+﻿using BcService.Abstraction.Repositories;
+using BcService.Models;
+using Telegram.Bot;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
 
 namespace BcService.Abstraction.Handler
 {
-    public class BotUpdateHandler : IUpdateHandler
+    public class BotUpdateHandler
     {
-        public Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+        private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly ITelegramBotClient botClient;
+
+        public BotUpdateHandler(IServiceScopeFactory serviceScopeFactory, ITelegramBotClient _botClient)
         {
-            throw new NotImplementedException();
+            _serviceScopeFactory = serviceScopeFactory;
+            botClient = _botClient;
         }
 
-        public async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
+        public async Task HandleUpdateAsync(Update update, CancellationToken cancellationToken)
         {
-            // Only process Message updates: https://core.telegram.org/bots/api#message
-            if (update.Message is not { } message)
-                return;
-            // Only process text messages
-            if (message.Text is not { } messageText)
-                return;
+            var message = update.Type switch
+            {
+                UpdateType.Message => HandleMessageAsync(update.Message, cancellationToken),
+                _ => HandleRandomMessageAsync(update.Message, cancellationToken),
+            };
 
-            var chatId = message.Chat.Id;
+            try
+            {
+                await message;
+            }
+            catch
+            {
+                await message;
+            }
+        }
 
-            Console.WriteLine($"Received a '{messageText}' message in chat {chatId}.");
+        private Task HandleRandomMessageAsync(Message? message, CancellationToken cancellationToken)
+        {
+            Console.WriteLine("{0} sent {1} type message", message?.From.Username, message?.Type);
+            return Task.CompletedTask;
+        }
 
-            // Echo received message text
-            Message sentMessage = await botClient.SendTextMessageAsync(
-                chatId: chatId,
-                text: "You said:\n" + messageText,
-                cancellationToken: cancellationToken);
+        private async Task HandleMessageAsync(Message message, CancellationToken cancellationToken)
+        {
+            try
+            {
+                using (var scope = _serviceScopeFactory.CreateScope())
+                {
+                    var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+
+                    var user = new UserModel()
+                    {
+                        Id = message.Chat.Id,
+                        Username = message.From.Username
+                    };
+
+                    await userRepository.Add(user);
+
+                    await botClient.SendTextMessageAsync(
+                        chatId: message.Chat.Id,
+                        text: $"You said:\n<i>{message.Text}</i>",
+                        parseMode: ParseMode.Html,
+                        cancellationToken: cancellationToken);
+                }
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine(exception.Message);
+            }
         }
     }
 }

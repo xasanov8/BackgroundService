@@ -1,6 +1,11 @@
 
 using BcService.Abstraction;
+using BcService.Abstraction.BackgroundServices;
 using BcService.Abstraction.Handler;
+using BcService.Abstraction.Repositories;
+using BcService.Infrostructure;
+using BcService.Models;
+using Microsoft.EntityFrameworkCore;
 using Telegram.Bot;
 using Telegram.Bot.Polling;
 
@@ -12,34 +17,59 @@ namespace BcService
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            builder.Services.AddHostedService<BcS>();
-
-            builder.Services.AddSingleton<IUpdateHandler, BotUpdateHandler>();
-
-            builder.Services.AddSingleton(new TelegramBotClient("6870782628:AAEH_4ldeBRsAiqg67mcGgEoNNH63iDdppw"));
-
-            // Add services to the container.
-
-            builder.Services.AddControllers();
-            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+            builder.Services.AddControllers().AddNewtonsoftJson();
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
 
+            builder.Services.AddScoped<BotUpdateHandler>();
+
+            builder.Services.AddScoped<IUserRepository, UserRepository>();
+
+            builder.Services.AddDbContext<AppDbContext>(options =>
+            {
+                options.UseNpgsql("Host=localhost;Port=16172;Database=BcBotDb;User Id=postgres;Password=axihub;");
+            });
+
+            var botConfig = builder.Configuration.GetSection("BotConfiguration").Get<BotConfiguration>();
+
+            builder.Services.AddHttpClient("webhook")
+                .AddTypedClient<ITelegramBotClient>(httpClient
+                    => new TelegramBotClient(botConfig.Token, httpClient));
+
+            builder.Services.AddHostedService<ConfigureWebhook>();
+            builder.Services.AddHostedService<HolAhvolBackgroundService>();
+
+
+
             var app = builder.Build();
 
-            // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())
             {
                 app.UseSwagger();
                 app.UseSwaggerUI();
             }
 
-            app.UseHttpsRedirection();
+            app.UseRouting();
 
-            app.UseAuthorization();
+            app.UseCors(ops =>
+            {
+                ops.AllowAnyHeader()
+                   .AllowAnyMethod()
+                   .AllowAnyOrigin();
+            });
 
 
-            app.MapControllers();
+            app.UseEndpoints(endpoints =>
+            {
+                var token = botConfig.Token;
+
+                endpoints.MapControllerRoute(
+                    name: "webhook",
+                    pattern: $"bot/{token}",
+                    new { controller = "WebHookConnect", action = "Connector" });
+
+                endpoints.MapControllers();
+            });
 
             app.Run();
         }
